@@ -39,6 +39,8 @@ header.top{
 }
 header.top h1{font-size:17px;font-weight:800;letter-spacing:.06em}
 header.top .sub{font-size:12px;color:#BFE3D2;margin-top:1px}
+#syncbtn{font-size:20px;color:#BFE3D2;padding:6px 10px;flex:0 0 auto;border-radius:50%}
+#syncbtn.spinning{animation:sp .9s linear infinite;color:#fff}
 main{flex:1;padding:14px 14px calc(86px + var(--safe-b))}
 
 /* 底部導覽 */
@@ -221,8 +223,13 @@ nav.tabs button.on{color:var(--primary);background:var(--primary-soft)}
 
 <div id="app" class="hidden">
   <header class="top">
-    <h1>客戶跟進系統</h1>
-    <div class="sub" id="hello"></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1;min-width:0">
+        <h1>客戶跟進系統</h1>
+        <div class="sub" id="hello"></div>
+      </div>
+      <button id="syncbtn" onclick="manualRefresh()" aria-label="重新整理">⟳</button>
+    </div>
   </header>
 
   <main>
@@ -379,7 +386,7 @@ nav.tabs button.on{color:var(--primary);background:var(--primary-soft)}
 <script>
 /* ═══════════ 設定(部署時填入) ═══════════ */
 const LIFF_ID = '2010634152-JWOMduF4';           // 例:2001234567-AbCdEfGh
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyhhGPdfjpPJdOoeGLPC3LxMEPVJLd1j0WhSM_lIoIPRTqjnKjCO7Z06gZr4oZJBvd1HA/exec';     // 例:https://script.google.com/macros/s/xxx/exec
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyhhGPdfjpPJdOoeGLPC3LxMEPVJLd1j0WhSM_lIoIPRTqjnKjCO7Z06gZr4oZJBvd1HA/exec';      // 例:https://script.google.com/macros/s/xxx/exec
 /* ═══════════════════════════════════════ */
 
 const STAGES = [
@@ -409,12 +416,64 @@ function toast(msg){
   clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 2200);
 }
 function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/864e5); }
+function addDaysStr(dateStr,n){
+  const p = dateStr.split('-').map(Number);
+  const d = new Date(p[0], p[1]-1, p[2]+n, 12);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function genId(prefix){
+  return prefix + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,4).toUpperCase();
+}
+
+/* ── 本地快取(秒開) ── */
+const CACHE_KEY = 'followup_cache_v1';
+function saveCache(){
+  try{
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ t: Date.now(), db: {
+      memberName: DB.memberName, customers: DB.customers, purchases: DB.purchases,
+      tasks: DB.tasks, notes: DB.notes, scripts: DB.scripts, repurchaseLead: DB.repurchaseLead,
+    }}));
+  }catch(e){}
+}
+function loadCache(){
+  try{
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (Date.now() - o.t > 7*864e5) return null;   // 超過 7 天視為過期
+    return o.db;
+  }catch(e){ return null; }
+}
+
+/* ── 背景同步框架(樂觀更新) ── */
+let pendingOps = 0, refreshing = false;
+function updateSync(){
+  const b = $('syncbtn');
+  if (b) b.classList.toggle('spinning', pendingOps > 0 || refreshing);
+}
+async function syncOp(call, rollback){
+  pendingOps++; updateSync();
+  try{
+    const r = await call();
+    if (!r || !r.ok) throw new Error((r && r.error) || '同步失敗');
+    saveCache();
+  }catch(e){
+    if (String(e.message) !== 'AUTH'){
+      if (rollback) rollback();
+      renderAll();
+      toast('⚠️ 同步失敗,已還原,請重試');
+    }
+  }finally{
+    pendingOps--; updateSync();
+  }
+}
 
 /* ── API ── */
 async function api(action, payload={}){
   const res = await fetch(GAS_URL, {
     method:'POST',
     headers:{'Content-Type':'text/plain'},   // 簡單請求,避開 CORS preflight
+    keepalive: true,                          // 頁面關閉後盡量讓請求送完
     body: JSON.stringify(Object.assign({action, idToken}, payload)),
   });
   const data = await res.json();
@@ -435,14 +494,48 @@ async function boot(){
     idToken = liff.getIDToken();
     if (!idToken) throw new Error('無法取得登入資訊,請確認 LIFF 已勾選 openid scope');
 
-    $('loadmsg').textContent = '載入資料中⋯';
-    await reload(true);
+    const cached = loadCache();
+    if (cached && cached.customers){
+      // 秒開:先用上次的資料渲染,背景再同步
+      DB = cached;
+      $('loading').classList.add('hidden');
+      $('app').classList.remove('hidden');
+      $('hello').textContent = (DB.memberName||'') + ' · ' + todayStr();
+      $('fab').classList.remove('hidden');
+      switchTab('today');
+      refresh();
+    } else {
+      $('loadmsg').textContent = '載入資料中⋯';
+      await reload(true);
+    }
   } catch(err){
     if (String(err.message)==='AUTH') return;
     $('loadmsg').textContent = '⚠️ ' + err.message;
     console.error(err);
   }
 }
+
+/** 背景重新抓取(不擋畫面) */
+async function refresh(){
+  if (refreshing) return;
+  refreshing = true; updateSync();
+  try{
+    const data = await api('init');
+    if (data.ok && data.registered){
+      DB = data; saveCache();
+      $('hello').textContent = data.memberName + ' · ' + todayStr();
+      renderAll();
+    } else if (data.ok && !data.registered){
+      localStorage.removeItem(CACHE_KEY);
+      showView('register'); $('fab').classList.add('hidden');
+    }
+  }catch(e){
+    if (String(e.message)!=='AUTH') toast('背景更新失敗,顯示的是快取資料');
+  }finally{
+    refreshing = false; updateSync();
+  }
+}
+function manualRefresh(){ refresh(); }
 
 async function reload(first){
   const data = await api('init');
@@ -457,6 +550,7 @@ async function reload(first){
     return;
   }
   DB = data;
+  saveCache();
   $('hello').textContent = data.memberName + ' · ' + todayStr();
   $('fab').classList.remove('hidden');
   if (first) switchTab('today'); else renderAll();
@@ -574,18 +668,29 @@ function pickResult(btn){
   document.querySelectorAll('#result-grid button').forEach(b=>b.classList.toggle('on', b===btn));
   $('done-save').disabled = false;
 }
-async function submitDone(){
-  $('done-save').disabled = true;
-  const r = await api('completeTask', { taskId: doneTaskId, result: doneResult, note: $('f-dnote').value.trim() });
+function submitDone(){
+  const task = DB.tasks.find(x=>x.id===doneTaskId);
+  if (!task) return;
+  const prev = { status:task.status, result:task.result, doneDate:task.doneDate, note:task.note };
+  const nt = $('f-dnote').value.trim();
+  task.status='完成'; task.result=doneResult; task.doneDate=todayStr();
+  if (nt) task.note = nt;
   closeSheet('done-mask');
-  if (r.ok){ toast('已記錄:' + doneResult + ' ✅'); await reload(); }
-  else toast(r.error || '操作失敗');
+  toast('已記錄:' + doneResult + ' ✅');
+  renderAll(); saveCache();
+  syncOp(()=>api('completeTask', { taskId: task.id, result: doneResult, note: nt }),
+         ()=>Object.assign(task, prev));
 }
-async function doSkip(taskId){
+function doSkip(taskId){
   if (!confirm('確定略過這筆跟進?')) return;
-  const r = await api('completeTask', { taskId, skip: true });
-  if (r.ok){ toast('已略過'); await reload(); }
-  else toast(r.error || '操作失敗');
+  const task = DB.tasks.find(x=>x.id===taskId);
+  if (!task) return;
+  const prev = { status:task.status, doneDate:task.doneDate };
+  task.status='略過'; task.doneDate=todayStr();
+  toast('已略過');
+  renderAll(); saveCache();
+  syncOp(()=>api('completeTask', { taskId, skip: true }),
+         ()=>Object.assign(task, prev));
 }
 
 /* ── 客戶列表 ── */
@@ -715,8 +820,32 @@ function openDetail(cid){
 function closeDetail(){ $('detail').classList.remove('show'); currentCustId = null; }
 
 /* ── 統計 ── */
+function computeStatsLocal(){
+  const t = todayStr(), month = t.slice(0,7);
+  const tasks = DB.tasks||[], notes = DB.notes||[], purchases = DB.purchases||[], customers = DB.customers||[];
+  const doneThisMonth = tasks.filter(x=>x.status==='完成' && String(x.doneDate).slice(0,7)===month).length;
+  const dueSoFar = tasks.filter(x=>x.date.slice(0,7)===month && x.date<=t && x.status!=='略過').length;
+  const doneOfDue = tasks.filter(x=>x.date.slice(0,7)===month && x.date<=t && x.status==='完成').length;
+  const overdue = tasks.filter(x=>x.status==='待辦' && x.date<t).length;
+  const cutoff = addDaysStr(t, -90);
+  const activeIds = {};
+  purchases.forEach(p=>{ if(p.date>=cutoff) activeIds[p.customerId]=true; });
+  let mCount=0, mSum=0;
+  purchases.forEach(p=>{ if(p.date.slice(0,7)===month){ mCount++; mSum += Number(p.amount)||0; } });
+  return {
+    month, doneThisMonth,
+    completionRate: dueSoFar ? Math.round(doneOfDue/dueSoFar*100) : null,
+    dueSoFar, doneOfDue, overdue,
+    openOpps: notes.filter(n=>n.status==='商機').length,
+    deals: notes.filter(n=>n.status==='已成交').length,
+    activeCustomers: Object.keys(activeIds).length,
+    totalCustomers: customers.length,
+    monthPurchases: mCount, monthAmount: mSum,
+  };
+}
+
 function renderStats(){
-  const s = DB.stats || {};
+  const s = computeStatsLocal();
   const rate = s.completionRate===null||s.completionRate===undefined ? '—' : s.completionRate+'%';
   $('view-stats').innerHTML = `
     <div class="card stat-hero">
@@ -729,7 +858,7 @@ function renderStats(){
       <div class="card"><div class="num">${s.activeCustomers||0}<span style="font-size:15px;color:var(--sub)">/${s.totalCustomers||0}</span></div><div class="lbl">活躍客戶(90 天)</div></div>
       <div class="card"><div class="num">${s.monthPurchases||0}</div><div class="lbl">本月購買筆數</div></div>
       <div class="card"><div class="num" style="color:var(--amber)">${s.openOpps||0}</div><div class="lbl">待跟進商機</div></div>
-      <div class="card"><div class="num green">${(DB.notes||[]).filter(n=>n.status==='已成交').length}</div><div class="lbl">已成交商機</div></div>
+      <div class="card"><div class="num green">${s.deals||0}</div><div class="lbl">已成交商機</div></div>
     </div>
     ${s.monthAmount?`<div class="card" style="margin-top:10px;text-align:center"><div class="num" style="font-size:24px;font-weight:900">$${Number(s.monthAmount).toLocaleString()}</div><div class="lbl" style="font-size:12px;color:var(--sub)">本月購買金額</div></div>`:''}
     <p style="color:var(--sub);font-size:12px;margin-top:14px;text-align:center">完成率 = 本月已到期任務中完成的比例(略過不計)</p>`;
@@ -744,17 +873,22 @@ function openCustomerForm(){
   $('cust-mask').classList.add('show');
   setTimeout(()=>$('f-cname').focus(),250);
 }
-async function saveCustomer(){
+function saveCustomer(){
   const name = $('f-cname').value.trim();
   if (!name){ toast('請輸入姓名'); return; }
-  $('cust-save').disabled = true;
-  const r = await api('addCustomer', {
-    name, contact: $('f-contact').value.trim(),
-    tags: $('f-tags').value.trim(), note: $('f-cnote').value.trim(),
-  });
-  $('cust-save').disabled = false;
-  if (r.ok){ closeSheet('cust-mask'); toast('已建立客戶:'+name); await reload(); if(currentTab!=='customers') switchTab('customers'); }
-  else toast(r.error||'建立失敗');
+  const c = {
+    id: genId('C'), name, date: todayStr(), status:'活躍',
+    tags: $('f-tags').value.trim(), contact: $('f-contact').value.trim(),
+    note: $('f-cnote').value.trim(),
+  };
+  c.customerId = c.id;
+  DB.customers.push(c);
+  closeSheet('cust-mask');
+  toast('已建立客戶:'+name);
+  if (currentTab!=='customers') switchTab('customers'); else renderAll();
+  saveCache();
+  syncOp(()=>api('addCustomer', { id:c.id, name, contact:c.contact, tags:c.tags, note:c.note }),
+         ()=>{ DB.customers = DB.customers.filter(x=>x.id!==c.id); });
 }
 
 function openNoteForm(prefCustId){
@@ -767,37 +901,53 @@ function openNoteForm(prefCustId){
   $('opp-extra').classList.add('hidden');
   $('note-mask').classList.add('show');
 }
-async function saveNote(){
+function saveNote(){
   const content = $('f-ncontent').value.trim();
   if (!content){ toast('請輸入內容'); return; }
   const isOpp = $('f-nopp').checked;
-  $('note-save').disabled = true;
-  const r = await api('addNote', {
-    customerId: $('f-ncust').value, content,
-    date: $('f-ndate').value, isOpp,
+  const n = {
+    id: genId('I'), customerId: $('f-ncust').value,
+    date: $('f-ndate').value || todayStr(),
     summary: isOpp ? ($('f-nsummary').value.trim() || content.slice(0,30)) : '',
-  });
-  $('note-save').disabled = false;
-  if (r.ok){ closeSheet('note-mask'); toast(isOpp?'已記錄商機 💡':'已記錄互動 📝'); await reload(); }
-  else toast(r.error||'儲存失敗');
+    status: isOpp ? '商機' : '一般', content,
+  };
+  DB.notes.push(n);
+  closeSheet('note-mask');
+  toast(isOpp?'已記錄商機 💡':'已記錄互動 📝');
+  renderAll(); saveCache();
+  syncOp(()=>api('addNote', { id:n.id, customerId:n.customerId, content, date:n.date, isOpp, summary:n.summary }),
+         ()=>{ DB.notes = DB.notes.filter(x=>x.id!==n.id); });
 }
-async function markDeal(noteId, cid){
-  const r = await api('updateNote', { noteId, status:'已成交' });
-  if (r.ok){ toast('已標記成交 🎉 順手記錄這筆購買吧!'); await reload(); openPurchaseForm(cid); }
-  else toast(r.error||'操作失敗');
+function markDeal(noteId, cid){
+  const n = DB.notes.find(x=>x.id===noteId); if(!n) return;
+  const prev = n.status;
+  n.status = '已成交';
+  toast('已標記成交 🎉 順手記錄這筆購買吧!');
+  renderAll(); saveCache();
+  openPurchaseForm(cid);
+  syncOp(()=>api('updateNote', { noteId, status:'已成交' }),
+         ()=>{ n.status = prev; });
 }
-async function promoteOpp(noteId){
-  const cid = currentCustId;
-  const r = await api('updateNote', { noteId, status:'商機' });
-  if (r.ok){ toast('已標為商機 💡'); await reload(); if(cid) openDetail(cid); }
-  else toast(r.error||'操作失敗');
+function promoteOpp(noteId){
+  const n = DB.notes.find(x=>x.id===noteId); if(!n) return;
+  const prev = n.status, cid = currentCustId;
+  n.status = '商機';
+  toast('已標為商機 💡');
+  renderAll(); saveCache();
+  if (cid) openDetail(cid);
+  syncOp(()=>api('updateNote', { noteId, status:'商機' }),
+         ()=>{ n.status = prev; if(cid) openDetail(cid); });
 }
-async function cancelOpp(noteId){
+function cancelOpp(noteId){
   if (!confirm('取消這筆商機?')) return;
-  const cid = currentCustId;
-  const r = await api('updateNote', { noteId, status:'取消' });
-  if (r.ok){ toast('已取消'); await reload(); if(cid) openDetail(cid); }
-  else toast(r.error||'操作失敗');
+  const n = DB.notes.find(x=>x.id===noteId); if(!n) return;
+  const prev = n.status, cid = currentCustId;
+  n.status = '取消';
+  toast('已取消');
+  renderAll(); saveCache();
+  if (cid) openDetail(cid);
+  syncOp(()=>api('updateNote', { noteId, status:'取消' }),
+         ()=>{ n.status = prev; if(cid) openDetail(cid); });
 }
 
 function openPurchaseForm(prefCustId){
@@ -812,22 +962,42 @@ function openPurchaseForm(prefCustId){
   $('f-qty').value='1'; $('f-amount').value=''; $('f-days').value=''; $('f-pnote').value='';
   $('pur-mask').classList.add('show');
 }
-async function savePurchase(){
+function savePurchase(){
   const product = $('f-product').value.trim();
   if (!product){ toast('請輸入產品名稱'); return; }
-  $('pur-save').disabled = true;
-  const r = await api('addPurchase', {
-    customerId: $('f-pcust').value, product,
-    date: $('f-pdate').value, qty: $('f-qty').value,
-    amount: $('f-amount').value, usedUpDays: $('f-days').value,
-    note: $('f-pnote').value.trim(),
-  });
-  $('pur-save').disabled = false;
-  if (r.ok){
-    closeSheet('pur-mask');
-    toast('已記錄!自動排入 '+(r.tasks||[]).length+' 個跟進提醒 ✅');
-    await reload(); switchTab('today');
-  } else toast(r.error||'送出失敗');
+  const custId = $('f-pcust').value;
+  const date = $('f-pdate').value || todayStr();
+  const days = Math.max(0, parseInt($('f-days').value, 10) || 0);
+  const pid = genId('P');
+
+  const pur = {
+    id: pid, customerId: custId, name: product, date,
+    qty: String($('f-qty').value || '1'), amount: String($('f-amount').value || ''),
+    usedUpDays: days ? String(days) : '', note: $('f-pnote').value.trim(),
+  };
+  const newTasks = STAGES.map(s => ({
+    id: genId('T'), customerId: custId, purchaseId: pid, taskType: s.key,
+    date: addDaysStr(date, s.off), status:'待辦', result:'', doneDate:'', note:'',
+  }));
+  if (days > 0){
+    const lead = Number(DB.repurchaseLead || 5);
+    newTasks.push({
+      id: genId('T'), customerId: custId, purchaseId: pid, taskType:'回購',
+      date: addDaysStr(date, Math.max(1, days - lead)), status:'待辦', result:'', doneDate:'', note:'',
+    });
+  }
+  DB.purchases.push(pur);
+  DB.tasks.push(...newTasks);
+  closeSheet('pur-mask');
+  toast('已記錄!排入 '+newTasks.length+' 個跟進提醒 ✅');
+  switchTab('today');
+  saveCache();
+  syncOp(()=>api('addPurchase', {
+      id: pid, taskIds: newTasks.map(t=>t.id),
+      customerId: custId, product, date,
+      qty: pur.qty, amount: $('f-amount').value, usedUpDays: $('f-days').value, note: pur.note,
+    }),
+    ()=>{ DB.purchases = DB.purchases.filter(x=>x.id!==pid); DB.tasks = DB.tasks.filter(x=>x.purchaseId!==pid); });
 }
 
 boot();
