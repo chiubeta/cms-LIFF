@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>客戶跟進系統</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+:root{
+  --bg:#F4F6F3; --card:#FFFFFF; --ink:#17251F; --sub:#7C877F; --line:#E3E9E3;
+  --primary:#0E6B4E; --primary-soft:#E4F1EA; --primary-deep:#0A523C;
+  --danger:#C2452D; --danger-soft:#F9E9E4;
+  --violet:#7A5AF8; --violet-soft:#EEEAFD;
+  --amber:#B8860B;
+  --radius:14px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:'Noto Sans TC','PingFang TC','Microsoft JhengHei',system-ui,sans-serif;
+  background:var(--bg); color:var(--ink); font-size:15px; line-height:1.55;
+}
+button{font:inherit;border:0;background:none;cursor:pointer;color:inherit}
+input,select,textarea{
+  font:inherit;width:100%;border:1.5px solid var(--line);border-radius:10px;
+  padding:10px 12px;background:#fff;color:var(--ink);
+}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)}
+label{display:block;font-size:12.5px;font-weight:700;color:var(--sub);margin:14px 0 5px;letter-spacing:.03em}
+label .req{color:var(--danger)}
+label .hint{font-weight:400;letter-spacing:0}
+
+/* ── 版面 ── */
+#app{max-width:560px;margin:0 auto;min-height:100%;display:flex;flex-direction:column}
+header.top{
+  position:sticky;top:0;z-index:20;background:var(--primary);color:#fff;
+  padding:14px 18px 12px;border-radius:0 0 18px 18px;
+}
+header.top h1{font-size:17px;font-weight:800;letter-spacing:.06em}
+header.top .sub{font-size:12px;color:#BFE3D2;margin-top:1px}
+main{flex:1;padding:14px 14px calc(86px + var(--safe-b))}
+
+/* 底部導覽 */
+nav.tabs{
+  position:fixed;bottom:0;left:0;right:0;z-index:30;
+  background:#fff;border-top:1px solid var(--line);
+  padding:6px 8px calc(6px + var(--safe-b));
+  display:flex;justify-content:space-around;max-width:560px;margin:0 auto;
+}
+nav.tabs button{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:6px 0;border-radius:10px;font-size:11px;color:var(--sub);font-weight:700;
+}
+nav.tabs button .ico{font-size:19px;line-height:1}
+nav.tabs button.on{color:var(--primary);background:var(--primary-soft)}
+
+/* FAB */
+#fab{
+  position:fixed;right:max(16px,calc(50% - 264px));bottom:calc(74px + var(--safe-b));z-index:30;
+  width:54px;height:54px;border-radius:50%;background:var(--primary);color:#fff;
+  font-size:28px;font-weight:300;box-shadow:0 6px 16px rgba(14,107,78,.35);
+  display:flex;align-items:center;justify-content:center;
+}
+#fab:active{transform:scale(.94)}
+
+/* ── 卡片 ── */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+.sec-title{font-size:12.5px;font-weight:800;letter-spacing:.08em;margin:16px 2px 8px;display:flex;align-items:center;gap:6px}
+.sec-title.green{color:var(--primary)}
+.sec-title.red{color:var(--danger)}
+.sec-title.gray{color:var(--sub)}
+.empty{color:var(--sub);text-align:center;padding:34px 10px;font-size:14px}
+.empty .big{font-size:34px;display:block;margin-bottom:8px}
+
+/* 任務卡 */
+.task .row1{display:flex;align-items:center;gap:8px}
+.task .cname{font-weight:800;font-size:16px;flex:1}
+.task .meta{color:var(--sub);font-size:12.5px;margin-top:3px}
+.chip{
+  display:inline-flex;align-items:center;font-size:11.5px;font-weight:800;
+  padding:2px 9px;border-radius:999px;letter-spacing:.04em;white-space:nowrap;
+}
+.chip.stage{background:var(--primary-soft);color:var(--primary-deep)}
+.chip.re{background:var(--violet-soft);color:var(--violet)}
+.chip.late{background:var(--danger-soft);color:var(--danger)}
+.chip.tag{background:#F0F2EF;color:var(--sub);font-weight:600}
+.chip.opp{background:#FBF1D9;color:#8A6508}
+.chip.deal{background:var(--primary-soft);color:var(--primary-deep)}
+.script-box{
+  margin-top:10px;background:#F7FAF7;border:1px dashed var(--line);border-radius:10px;
+  padding:10px 12px;font-size:13.5px;color:#3E4C44;display:none;
+}
+.task.open .script-box{display:block}
+.task .acts{display:flex;gap:8px;margin-top:11px}
+.btn{
+  flex:1;padding:9px 0;border-radius:10px;font-weight:800;font-size:13.5px;text-align:center;
+}
+.btn.pri{background:var(--primary);color:#fff}
+.btn.ghost{background:#fff;border:1.5px solid var(--line);color:var(--sub)}
+.btn.soft{background:var(--primary-soft);color:var(--primary-deep)}
+.btn:active{opacity:.8}
+.btn:disabled{opacity:.45}
+
+/* 客戶列表 */
+.searchbar{display:flex;gap:8px;margin-bottom:10px}
+.filters{display:flex;gap:7px;overflow-x:auto;padding-bottom:8px;margin-bottom:4px;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.filters button{
+  white-space:nowrap;padding:5px 13px;border-radius:999px;font-size:12.5px;font-weight:700;
+  background:#fff;border:1.5px solid var(--line);color:var(--sub);
+}
+.filters button.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.cust{display:flex;align-items:center;gap:12px}
+.cust .avatar{
+  width:42px;height:42px;border-radius:50%;background:var(--primary-soft);color:var(--primary-deep);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;flex-shrink:0;
+}
+.cust .info{flex:1;min-width:0}
+.cust .nm{font-weight:800;font-size:15.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cust .ls{color:var(--sub);font-size:12.5px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{
+  min-width:22px;height:22px;border-radius:11px;padding:0 6px;font-size:11.5px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+.badge.pend{background:var(--primary-soft);color:var(--primary-deep)}
+.badge.late{background:var(--danger);color:#fff}
+
+/* 統計 */
+.stat-hero{background:var(--primary);color:#fff;border:0;text-align:center;padding:22px 14px}
+.stat-hero .num{font-size:44px;font-weight:900;line-height:1.1}
+.stat-hero .lbl{font-size:12.5px;color:#BFE3D2;margin-top:2px}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat-grid .card{margin:0;text-align:center;padding:16px 10px}
+.stat-grid .num{font-size:26px;font-weight:900}
+.stat-grid .num.red{color:var(--danger)}
+.stat-grid .num.green{color:var(--primary)}
+.stat-grid .lbl{font-size:12px;color:var(--sub);margin-top:2px}
+
+/* 客戶詳情(覆蓋層) */
+.overlay{
+  position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;
+  max-width:560px;margin:0 auto;display:none;
+}
+.overlay.show{display:block}
+.overlay .bar{
+  position:sticky;top:0;background:var(--primary);color:#fff;z-index:5;
+  display:flex;align-items:center;gap:10px;padding:13px 14px;
+}
+.overlay .bar .back{font-size:21px;padding:2px 8px}
+.overlay .bar h2{font-size:16.5px;font-weight:800;flex:1}
+.overlay .body{padding:14px 14px calc(30px + var(--safe-b))}
+
+/* 跟進軌道(招牌元素) */
+.track{display:flex;align-items:center;margin-top:12px}
+.track .node{display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 auto}
+.track .dot{
+  width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:800;border:2px solid var(--line);background:#fff;color:var(--sub);
+}
+.track .dot.done{background:var(--primary);border-color:var(--primary);color:#fff}
+.track .dot.late{background:#fff;border-color:var(--danger);color:var(--danger)}
+.track .dot.todo{border-color:var(--primary);color:var(--primary)}
+.track .dot.skip{background:#EEF1ED;border-color:#EEF1ED;color:#AAB4AC;text-decoration:line-through}
+.track .dot.re{border-color:var(--violet);color:var(--violet)}
+.track .dot.re.done{background:var(--violet);color:#fff}
+.track .nl{font-size:10px;color:var(--sub);font-weight:700}
+.track .link{flex:1;height:2px;background:var(--line);min-width:8px;margin:0 2px 16px}
+.track .link.done{background:var(--primary)}
+
+/* Modal / Sheet */
+.sheet-mask{position:fixed;inset:0;z-index:50;background:rgba(20,30,25,.45);display:none;align-items:flex-end;justify-content:center}
+.sheet-mask.show{display:flex}
+.sheet{
+  background:#fff;width:100%;max-width:560px;border-radius:20px 20px 0 0;
+  padding:18px 18px calc(22px + var(--safe-b));max-height:88vh;overflow-y:auto;
+  animation:up .22s ease;
+}
+@keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet h3{font-size:16.5px;font-weight:800;margin-bottom:2px}
+.sheet .desc{font-size:12.5px;color:var(--sub)}
+.sheet .foot{display:flex;gap:10px;margin-top:20px}
+.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
+.result-grid button{
+  border:1.5px solid var(--line);border-radius:12px;padding:13px 6px;font-weight:800;font-size:14px;background:#fff;
+}
+.result-grid button.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary-deep)}
+.menu-item{
+  display:flex;align-items:center;gap:12px;width:100%;padding:15px 6px;
+  border-bottom:1px solid var(--line);font-weight:800;font-size:15.5px;text-align:left;
+}
+.menu-item:last-of-type{border-bottom:0}
+.menu-item .ico{font-size:20px}
+
+/* 其他 */
+#toast{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + var(--safe-b));z-index:60;
+  background:var(--ink);color:#fff;padding:9px 18px;border-radius:999px;font-size:13.5px;font-weight:700;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+#toast.show{opacity:1}
+#loading{
+  position:fixed;inset:0;z-index:70;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--sub);
+}
+.spin{width:34px;height:34px;border-radius:50%;border:3.5px solid var(--line);border-top-color:var(--primary);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hidden{display:none!important}
+.kv{display:flex;gap:8px;font-size:13.5px;margin-top:4px}
+.kv .k{color:var(--sub);flex:0 0 66px}
+.p-item{border-top:1px solid var(--line);padding:13px 0}
+.p-item:first-of-type{border-top:0;padding-top:2px}
+.p-item .pn{font-weight:800}
+.p-item .pm{color:var(--sub);font-size:12.5px;margin-top:1px}
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spin"></div><div id="loadmsg">連線中⋯</div></div>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <h1>客戶跟進系統</h1>
+    <div class="sub" id="hello"></div>
+  </header>
+
+  <main>
+    <!-- 註冊 -->
+    <section id="view-register" class="hidden">
+      <div class="card" style="margin-top:20px">
+        <h3 style="font-weight:800;font-size:16.5px">首次使用,先註冊 👋</h3>
+        <p style="color:var(--sub);font-size:13.5px;margin-top:4px">輸入你的名字,系統會為你建立專屬的客戶資料區,只有你自己看得到。</p>
+        <label>你的名字 <span class="req">*</span></label>
+        <input id="reg-name" placeholder="例:一晉" maxlength="20">
+        <div class="sheet foot" style="padding:0;margin-top:18px;display:flex;gap:10px">
+          <button class="btn pri" style="padding:12px 0" onclick="doRegister()">完成註冊</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 今日 -->
+    <section id="view-today" class="hidden"></section>
+
+    <!-- 客戶 -->
+    <section id="view-customers" class="hidden">
+      <div class="searchbar"><input id="q" placeholder="🔍 搜尋姓名、標籤、產品⋯" oninput="renderCustomers()"></div>
+      <div class="filters" id="filters"></div>
+      <div id="cust-list"></div>
+    </section>
+
+    <!-- 統計 -->
+    <section id="view-stats" class="hidden"></section>
+  </main>
+
+  <button id="fab" onclick="openActionMenu()" aria-label="新增">＋</button>
+
+  <nav class="tabs">
+    <button id="tab-today" onclick="switchTab('today')"><span class="ico">📋</span>今日</button>
+    <button id="tab-customers" onclick="switchTab('customers')"><span class="ico">👥</span>客戶</button>
+    <button id="tab-stats" onclick="switchTab('stats')"><span class="ico">📊</span>統計</button>
+  </nav>
+</div>
+
+<!-- 客戶詳情 -->
+<div class="overlay" id="detail">
+  <div class="bar">
+    <button class="back" onclick="closeDetail()" aria-label="返回">‹</button>
+    <h2 id="d-name"></h2>
+    <button class="btn soft" style="flex:0 0 auto;padding:7px 14px" onclick="openPurchaseForm(currentCustId)">＋記錄購買</button>
+  </div>
+  <div class="body" id="d-body"></div>
+</div>
+
+<!-- 動作選單 -->
+<div class="sheet-mask" id="menu-mask" onclick="if(event.target===this)closeSheet('menu-mask')">
+  <div class="sheet">
+    <button class="menu-item" onclick="closeSheet('menu-mask');openCustomerForm()"><span class="ico">👤</span>新增客戶</button>
+    <button class="menu-item" onclick="closeSheet('menu-mask');openPurchaseForm()"><span class="ico">🛒</span>記錄購買</button>
+    <button class="menu-item" onclick="closeSheet('menu-mask');openNoteForm()"><span class="ico">💬</span>記聊天 / 商機</button>
+  </div>
+</div>
+
+<!-- 新增客戶 -->
+<div class="sheet-mask" id="cust-mask" onclick="if(event.target===this)closeSheet('cust-mask')">
+  <div class="sheet">
+    <h3>新增客戶</h3>
+    <label>姓名 <span class="req">*</span></label>
+    <input id="f-cname" placeholder="例:王小美">
+    <label>聯絡方式 <span class="hint">(電話 / LINE ID)</span></label>
+    <input id="f-contact" placeholder="例:0912-345-678">
+    <label>標籤 <span class="hint">(逗號分隔)</span></label>
+    <input id="f-tags" placeholder="例:新客,減重,朋友介紹">
+    <label>備註</label>
+    <textarea id="f-cnote" rows="2" placeholder="例:對益生菌有興趣"></textarea>
+    <div class="foot">
+      <button class="btn ghost" onclick="closeSheet('cust-mask')">取消</button>
+      <button class="btn pri" id="cust-save" onclick="saveCustomer()">建立客戶</button>
+    </div>
+  </div>
+</div>
+
+<!-- 記錄購買 -->
+<div class="sheet-mask" id="pur-mask" onclick="if(event.target===this)closeSheet('pur-mask')">
+  <div class="sheet">
+    <h3>記錄購買</h3>
+    <p class="desc">送出後自動建立 D+1 / D+3 / D+7 / D+15 跟進提醒</p>
+    <label>客戶 <span class="req">*</span></label>
+    <select id="f-pcust"></select>
+    <label>產品 <span class="req">*</span></label>
+    <input id="f-product" list="product-list" placeholder="例:OPC-3">
+    <datalist id="product-list"></datalist>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label>購買日期</label><input id="f-pdate" type="date"></div>
+      <div style="flex:0 0 88px"><label>數量</label><input id="f-qty" type="number" min="1" value="1"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label>金額 <span class="hint">(選填)</span></label><input id="f-amount" type="number" min="0" placeholder="1580"></div>
+      <div style="flex:1"><label>預估用完天數</label><input id="f-days" type="number" min="1" placeholder="例:30"></div>
+    </div>
+    <p class="desc" style="margin-top:5px">💡 填「用完天數」會在用完前自動產生回購提醒</p>
+    <label>備註</label>
+    <input id="f-pnote" placeholder="例:第一次購買,搭配活動">
+    <div class="foot">
+      <button class="btn ghost" onclick="closeSheet('pur-mask')">取消</button>
+      <button class="btn pri" id="pur-save" onclick="savePurchase()">送出</button>
+    </div>
+  </div>
+</div>
+
+<!-- 記聊天 / 商機 -->
+<div class="sheet-mask" id="note-mask" onclick="if(event.target===this)closeSheet('note-mask')">
+  <div class="sheet">
+    <h3>記聊天 / 商機</h3>
+    <p class="desc">隨手記下互動內容,累積日後零售的線索</p>
+    <label>客戶 <span class="req">*</span></label>
+    <select id="f-ncust"></select>
+    <label>日期</label>
+    <input id="f-ndate" type="date">
+    <label>聊了什麼 <span class="req">*</span></label>
+    <textarea id="f-ncontent" rows="3" placeholder="例:最近工作忙常失眠、小孩剛開學很累⋯"></textarea>
+    <label style="display:flex;align-items:center;gap:9px;margin-top:16px;font-size:14.5px;font-weight:800;color:var(--ink);letter-spacing:0">
+      <input type="checkbox" id="f-nopp" style="width:19px;height:19px;flex:0 0 auto" onchange="document.getElementById('opp-extra').classList.toggle('hidden',!this.checked)">
+      💡 標記為零售商機
+    </label>
+    <div id="opp-extra" class="hidden">
+      <label>需求摘要 <span class="hint">(會顯示在商機清單)</span></label>
+      <input id="f-nsummary" placeholder="例:睡眠保健需求,可介紹酸櫻桃">
+    </div>
+    <div class="foot">
+      <button class="btn ghost" onclick="closeSheet('note-mask')">取消</button>
+      <button class="btn pri" id="note-save" onclick="saveNote()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 完成跟進 -->
+<div class="sheet-mask" id="done-mask" onclick="if(event.target===this)closeSheet('done-mask')">
+  <div class="sheet">
+    <h3 id="done-title">記錄跟進結果</h3>
+    <p class="desc" id="done-sub"></p>
+    <div class="result-grid" id="result-grid">
+      <button data-r="反應好" onclick="pickResult(this)">😊 反應好</button>
+      <button data-r="普通" onclick="pickResult(this)">😐 普通</button>
+      <button data-r="有疑慮" onclick="pickResult(this)">🤔 有疑慮</button>
+      <button data-r="沒回應" onclick="pickResult(this)">📵 沒回應</button>
+    </div>
+    <label>備註 <span class="hint">(選填)</span></label>
+    <input id="f-dnote" placeholder="例:睡眠有改善,想加購魚油">
+    <div class="foot">
+      <button class="btn ghost" onclick="closeSheet('done-mask')">取消</button>
+      <button class="btn pri" id="done-save" onclick="submitDone()" disabled>完成跟進</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═══════════ 設定(部署時填入) ═══════════ */
+const LIFF_ID = '請填入你的LIFF_ID';           // 例:2001234567-AbCdEfGh
+const GAS_URL = '請填入你的GAS_WebApp網址';     // 例:https://script.google.com/macros/s/xxx/exec
+/* ═══════════════════════════════════════ */
+
+const STAGES = [
+  {key:'D1', label:'D+1', off:1},
+  {key:'D3', label:'D+3', off:3},
+  {key:'D7', label:'D+7', off:7},
+  {key:'D15',label:'D+15',off:15},
+];
+const stageLabel = k => k==='回購' ? '回購' : (STAGES.find(s=>s.key===k)||{label:k}).label;
+
+let idToken = null;
+let DB = { customers:[], purchases:[], tasks:[], notes:[], scripts:{}, stats:{} };
+let currentTab = 'today';
+let currentCustId = null;
+let custFilter = '全部';
+let doneTaskId = null, doneResult = null;
+
+/* ── 工具 ── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/864e5); }
+
+/* ── API ── */
+async function api(action, payload={}){
+  const res = await fetch(GAS_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain'},   // 簡單請求,避開 CORS preflight
+    body: JSON.stringify(Object.assign({action, idToken}, payload)),
+  });
+  const data = await res.json();
+  if (data && data.error === 'AUTH') {
+    toast('登入逾時,重新驗證中⋯');
+    liff.login({ redirectUri: location.href });
+    throw new Error('AUTH');
+  }
+  return data;
+}
+
+/* ── 初始化 ── */
+async function boot(){
+  try{
+    $('loadmsg').textContent = '連線 LINE 中⋯';
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    idToken = liff.getIDToken();
+    if (!idToken) throw new Error('無法取得登入資訊,請確認 LIFF 已勾選 openid scope');
+
+    $('loadmsg').textContent = '載入資料中⋯';
+    await reload(true);
+  } catch(err){
+    if (String(err.message)==='AUTH') return;
+    $('loadmsg').textContent = '⚠️ ' + err.message;
+    console.error(err);
+  }
+}
+
+async function reload(first){
+  const data = await api('init');
+  if (!data.ok) throw new Error(data.message || data.error || '載入失敗');
+  $('loading').classList.add('hidden');
+  $('app').classList.remove('hidden');
+
+  if (!data.registered){
+    showView('register');
+    $('hello').textContent = '尚未註冊';
+    $('fab').classList.add('hidden');
+    return;
+  }
+  DB = data;
+  $('hello').textContent = data.memberName + ' · ' + todayStr();
+  $('fab').classList.remove('hidden');
+  if (first) switchTab('today'); else renderAll();
+}
+
+async function doRegister(){
+  const name = $('reg-name').value.trim();
+  if (!name) { toast('請輸入名字'); return; }
+  const r = await api('register', { name });
+  if (r.registered) { toast('註冊完成!'); await reload(true); }
+  else toast(r.message || '註冊失敗');
+}
+
+/* ── 分頁切換 ── */
+function showView(v){
+  ['register','today','customers','stats'].forEach(x =>
+    $('view-'+x).classList.toggle('hidden', x!==v));
+}
+function switchTab(t){
+  currentTab = t;
+  showView(t);
+  ['today','customers','stats'].forEach(x =>
+    $('tab-'+x).classList.toggle('on', x===t));
+  renderAll();
+}
+function renderAll(){
+  if (currentTab==='today') renderToday();
+  if (currentTab==='customers') renderCustomers();
+  if (currentTab==='stats') renderStats();
+}
+
+/* ── 今日任務 ── */
+function taskCard(task){
+  const cust = DB.customers.find(c=>c.id===task.customerId) || {};
+  const pur = DB.purchases.find(p=>p.id===task.purchaseId) || {};
+  const t = todayStr();
+  const isRe = task.taskType==='回購';
+  const late = task.date < t;
+  const script = DB.scripts[isRe ? '回購' : task.taskType] || '';
+  const lateDays = late ? daysBetween(task.date, t) : 0;
+  return `
+  <div class="card task" id="task-${esc(task.id)}">
+    <div class="row1">
+      <span class="chip ${isRe?'re':'stage'}">${isRe?'🔄 ':''}${esc(stageLabel(task.taskType))}</span>
+      <span class="cname">${esc(cust.name||'?')}</span>
+      ${late?`<span class="chip late">逾期 ${lateDays} 天</span>`:''}
+    </div>
+    <div class="meta">🛒 ${esc(pur.name||'')}${pur.date?' · '+esc(pur.date)+' 購買':''}${cust.contact?' · 📱 '+esc(cust.contact):''}</div>
+    <div class="script-box">💬 ${esc(script)}</div>
+    <div class="acts">
+      <button class="btn ghost" onclick="toggleScript('${esc(task.id)}')">話術</button>
+      <button class="btn ghost" onclick="doSkip('${esc(task.id)}')">略過</button>
+      <button class="btn pri" onclick="openDone('${esc(task.id)}')">完成跟進</button>
+    </div>
+  </div>`;
+}
+function toggleScript(id){ $('task-'+id).classList.toggle('open'); }
+
+function renderToday(){
+  const t = todayStr();
+  const week = (d=>{d.setDate(d.getDate()+7);return d.toISOString().slice(0,10)})(new Date());
+  const pend = DB.tasks.filter(x=>x.status==='待辦').sort((a,b)=>a.date<b.date?-1:1);
+  const late = pend.filter(x=>x.date<t);
+  const today = pend.filter(x=>x.date===t);
+  const soon = pend.filter(x=>x.date>t && x.date<=week);
+
+  let html = '';
+  if (late.length) html += `<div class="sec-title red">🔴 逾期(${late.length})</div>` + late.map(taskCard).join('');
+  if (today.length) html += `<div class="sec-title green">📅 今日到期(${today.length})</div>` + today.map(taskCard).join('');
+  if (!late.length && !today.length)
+    html += `<div class="empty"><span class="big">🎉</span>今日沒有待跟進的任務!<br>記錄新的購買會自動排入跟進週期。</div>`;
+  if (soon.length){
+    html += `<div class="sec-title gray">⏳ 未來 7 天(${soon.length})</div>` + soon.slice(0,8).map(x=>{
+      const c = DB.customers.find(v=>v.id===x.customerId)||{};
+      const p = DB.purchases.find(v=>v.id===x.purchaseId)||{};
+      return `<div class="card" style="padding:11px 14px;display:flex;align-items:center;gap:9px">
+        <span class="chip ${x.taskType==='回購'?'re':'stage'}">${esc(stageLabel(x.taskType))}</span>
+        <b style="flex:1">${esc(c.name||'?')}</b>
+        <span style="color:var(--sub);font-size:12.5px">${esc(p.name||'')} · ${esc(x.date)}</span>
+      </div>`;
+    }).join('');
+  }
+
+  const opps = (DB.notes||[]).filter(n=>n.status==='商機').sort((a,b)=>a.date<b.date?1:-1);
+  if (opps.length){
+    html += `<div class="sec-title" style="color:var(--amber)">💡 零售商機(${opps.length})</div>` + opps.slice(0,6).map(n=>{
+      const c = DB.customers.find(v=>v.id===n.customerId)||{};
+      return `<div class="card" style="padding:11px 14px" onclick="openDetail('${esc(n.customerId)}')">
+        <div style="display:flex;align-items:center;gap:9px">
+          <b style="flex:1">${esc(c.name||'?')}</b>
+          <span style="color:var(--sub);font-size:12px">${esc(n.date)}</span>
+        </div>
+        <div style="color:var(--sub);font-size:13px;margin-top:2px">${esc(n.summary||n.content)}</div>
+      </div>`;
+    }).join('');
+  }
+  $('view-today').innerHTML = html;
+}
+
+/* ── 完成 / 略過任務 ── */
+function openDone(taskId){
+  doneTaskId = taskId; doneResult = null;
+  const task = DB.tasks.find(x=>x.id===taskId);
+  const cust = DB.customers.find(c=>c.id===task.customerId)||{};
+  const pur = DB.purchases.find(p=>p.id===task.purchaseId)||{};
+  $('done-title').textContent = cust.name + ' · ' + stageLabel(task.taskType);
+  $('done-sub').textContent = '🛒 ' + (pur.name||'') + '(' + task.date + ' 到期)';
+  $('f-dnote').value = '';
+  $('done-save').disabled = true;
+  document.querySelectorAll('#result-grid button').forEach(b=>b.classList.remove('on'));
+  $('done-mask').classList.add('show');
+}
+function pickResult(btn){
+  doneResult = btn.dataset.r;
+  document.querySelectorAll('#result-grid button').forEach(b=>b.classList.toggle('on', b===btn));
+  $('done-save').disabled = false;
+}
+async function submitDone(){
+  $('done-save').disabled = true;
+  const r = await api('completeTask', { taskId: doneTaskId, result: doneResult, note: $('f-dnote').value.trim() });
+  closeSheet('done-mask');
+  if (r.ok){ toast('已記錄:' + doneResult + ' ✅'); await reload(); }
+  else toast(r.error || '操作失敗');
+}
+async function doSkip(taskId){
+  if (!confirm('確定略過這筆跟進?')) return;
+  const r = await api('completeTask', { taskId, skip: true });
+  if (r.ok){ toast('已略過'); await reload(); }
+  else toast(r.error || '操作失敗');
+}
+
+/* ── 客戶列表 ── */
+function custPending(cid){
+  const t = todayStr();
+  const pend = DB.tasks.filter(x=>x.customerId===cid && x.status==='待辦');
+  return { total: pend.length, late: pend.filter(x=>x.date<t).length };
+}
+function allTags(){
+  const s = new Set();
+  DB.customers.forEach(c=>(c.tags||'').split(/[,、，]/).forEach(t=>{t=t.trim();if(t)s.add(t)}));
+  return [...s];
+}
+function renderCustomers(){
+  const base = ['全部','有待辦','逾期','💡商機'].concat(allTags());
+  $('filters').innerHTML = base.map(f=>
+    `<button class="${custFilter===f?'on':''}" onclick="custFilter='${esc(f)}';renderCustomers()">${esc(f)}</button>`).join('');
+
+  const q = $('q').value.trim().toLowerCase();
+  let list = DB.customers.slice();
+  if (custFilter==='有待辦') list = list.filter(c=>custPending(c.id).total>0);
+  else if (custFilter==='逾期') list = list.filter(c=>custPending(c.id).late>0);
+  else if (custFilter==='💡商機') list = list.filter(c=>(DB.notes||[]).some(n=>n.customerId===c.id&&n.status==='商機'));
+  else if (custFilter!=='全部') list = list.filter(c=>(c.tags||'').includes(custFilter));
+  if (q) list = list.filter(c=>{
+    const purs = DB.purchases.filter(p=>p.customerId===c.id).map(p=>p.name).join(' ');
+    const nts = (DB.notes||[]).filter(n=>n.customerId===c.id).map(n=>n.summary+' '+n.content).join(' ');
+    return (c.name+' '+(c.tags||'')+' '+(c.contact||'')+' '+purs+' '+nts).toLowerCase().includes(q);
+  });
+  list.sort((a,b)=>{
+    const pa=custPending(a.id), pb=custPending(b.id);
+    return (pb.late-pa.late) || (pb.total-pa.total) || (a.name<b.name?-1:1);
+  });
+
+  $('cust-list').innerHTML = list.length ? list.map(c=>{
+    const p = custPending(c.id);
+    const purs = DB.purchases.filter(x=>x.customerId===c.id).sort((a,b)=>a.date<b.date?1:-1);
+    const last = purs[0];
+    return `<div class="card cust" onclick="openDetail('${esc(c.id)}')">
+      <div class="avatar">${esc((c.name||'?')[0])}</div>
+      <div class="info">
+        <div class="nm">${esc(c.name)}${(DB.notes||[]).some(n=>n.customerId===c.id&&n.status==='商機')?' 💡':''}${(c.tags||'').split(/[,、，]/).filter(t=>t.trim()).slice(0,2).map(t=>`<span class="chip tag">${esc(t.trim())}</span>`).join('')}</div>
+        <div class="ls">${last ? '🛒 '+esc(last.name)+' · '+esc(last.date) : '尚無購買紀錄'}</div>
+      </div>
+      ${p.late?`<span class="badge late">${p.late}</span>`:p.total?`<span class="badge pend">${p.total}</span>`:''}
+    </div>`;
+  }).join('') : `<div class="empty"><span class="big">👥</span>${q||custFilter!=='全部'?'沒有符合條件的客戶':'還沒有客戶,點右下角「＋」新增第一位!'}</div>`;
+}
+
+/* ── 客戶詳情 ── */
+function trackHtml(purchaseId){
+  const tasks = DB.tasks.filter(x=>x.purchaseId===purchaseId);
+  const t = todayStr();
+  const order = STAGES.map(s=>s.key).concat(['回購']);
+  const nodes = order.map(k=>{
+    const task = tasks.find(x=>x.taskType===k);
+    if (!task) return null;
+    let cls = 'todo', txt = k==='回購'?'🔄':stageLabel(k).replace('D+','');
+    if (task.status==='完成'){ cls='done'; txt='✓'; }
+    else if (task.status==='略過'){ cls='skip'; }
+    else if (task.date < t){ cls='late'; txt='!'; }
+    if (k==='回購') cls += ' re';
+    return { html:`<div class="node"><div class="dot ${cls}">${txt}</div><div class="nl">${esc(stageLabel(k))}</div></div>`, done: task.status==='完成' };
+  }).filter(Boolean);
+  return `<div class="track">${nodes.map((n,i)=>
+    (i?`<div class="link ${nodes[i-1].done&&n.done?'done':''}"></div>`:'')+n.html).join('')}</div>`;
+}
+function openDetail(cid){
+  currentCustId = cid;
+  const c = DB.customers.find(x=>x.id===cid); if(!c) return;
+  $('d-name').textContent = c.name;
+  const purs = DB.purchases.filter(p=>p.customerId===cid).sort((a,b)=>a.date<b.date?1:-1);
+  const doneTasks = DB.tasks.filter(x=>x.customerId===cid && x.status==='完成' && x.result)
+    .sort((a,b)=>a.doneDate<b.doneDate?1:-1);
+
+  let html = `<div class="card">
+    ${c.contact?`<div class="kv"><span class="k">聯絡</span><span>${esc(c.contact)}</span></div>`:''}
+    ${c.tags?`<div class="kv"><span class="k">標籤</span><span>${(c.tags||'').split(/[,、，]/).filter(t=>t.trim()).map(t=>`<span class="chip tag">${esc(t.trim())}</span>`).join(' ')}</span></div>`:''}
+    ${c.note?`<div class="kv"><span class="k">備註</span><span>${esc(c.note)}</span></div>`:''}
+    <div class="kv"><span class="k">建立</span><span>${esc(c.date)}</span></div>
+  </div>`;
+
+  html += `<button class="btn soft" style="width:100%;padding:11px 0;margin:2px 0 4px" onclick="openNoteForm('${esc(c.id)}')">💬 記一筆聊天 / 商機</button>`;
+
+  html += `<div class="sec-title green">🛒 購買紀錄(${purs.length})</div>`;
+  html += purs.length ? `<div class="card">` + purs.map(p=>`
+    <div class="p-item">
+      <div class="pn">${esc(p.name)}${p.qty&&p.qty!=='1'?' × '+esc(p.qty):''}</div>
+      <div class="pm">${esc(p.date)}${p.amount?' · $'+Number(p.amount).toLocaleString():''}${p.usedUpDays?' · 約 '+esc(p.usedUpDays)+' 天用完':''}${p.note?' · '+esc(p.note):''}</div>
+      ${trackHtml(p.id)}
+    </div>`).join('') + `</div>`
+    : `<div class="empty">尚無購買紀錄</div>`;
+
+  const notes = (DB.notes||[]).filter(n=>n.customerId===cid);
+  const feed = notes.map(n=>({kind:'note', d:n.date, n}))
+    .concat(doneTasks.map(x=>({kind:'task', d:x.doneDate, x})))
+    .sort((a,b)=>a.d<b.d?1:-1);
+
+  if (feed.length){
+    html += `<div class="sec-title gray">📒 互動與跟進(${feed.length})</div><div class="card">` +
+      feed.slice(0,25).map(f=>{
+        if (f.kind==='task'){
+          const x=f.x, p=DB.purchases.find(v=>v.id===x.purchaseId)||{};
+          return `<div class="p-item">
+            <div class="pn">${esc(stageLabel(x.taskType))} 跟進 · ${esc(x.result)}</div>
+            <div class="pm">${esc(x.doneDate)} · ${esc(p.name||'')}${x.note?' · '+esc(x.note):''}</div>
+          </div>`;
+        }
+        const n=f.n;
+        const chip = n.status==='商機' ? `<span class="chip opp">💡 商機</span>`
+          : n.status==='已成交' ? `<span class="chip deal">🎉 已成交</span>`
+          : n.status==='取消' ? `<span class="chip tag">已取消</span>` : '';
+        return `<div class="p-item">
+          <div class="pn" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">${chip}<span>${esc(n.summary||'聊天紀錄')}</span></div>
+          <div class="pm">${esc(n.date)} · ${esc(n.content)}</div>
+          ${n.status==='商機'?`<div class="acts" style="margin-top:9px">
+            <button class="btn ghost" onclick="cancelOpp('${esc(n.id)}')">取消商機</button>
+            <button class="btn pri" onclick="markDeal('${esc(n.id)}','${esc(cid)}')">已成交</button>
+          </div>`:''}
+          ${n.status==='一般'?`<button style="margin-top:7px;font-size:12.5px;font-weight:800;color:var(--amber)" onclick="promoteOpp('${esc(n.id)}')">💡 標為商機</button>`:''}
+        </div>`;
+      }).join('') + `</div>`;
+  }
+  $('d-body').innerHTML = html;
+  $('detail').classList.add('show');
+}
+function closeDetail(){ $('detail').classList.remove('show'); currentCustId = null; }
+
+/* ── 統計 ── */
+function renderStats(){
+  const s = DB.stats || {};
+  const rate = s.completionRate===null||s.completionRate===undefined ? '—' : s.completionRate+'%';
+  $('view-stats').innerHTML = `
+    <div class="card stat-hero">
+      <div class="num">${rate}</div>
+      <div class="lbl">${esc(s.month||'')} 跟進完成率(${s.doneOfDue||0}/${s.dueSoFar||0})</div>
+    </div>
+    <div class="stat-grid">
+      <div class="card"><div class="num green">${s.doneThisMonth||0}</div><div class="lbl">本月完成跟進</div></div>
+      <div class="card"><div class="num ${s.overdue?'red':''}">${s.overdue||0}</div><div class="lbl">目前逾期</div></div>
+      <div class="card"><div class="num">${s.activeCustomers||0}<span style="font-size:15px;color:var(--sub)">/${s.totalCustomers||0}</span></div><div class="lbl">活躍客戶(90 天)</div></div>
+      <div class="card"><div class="num">${s.monthPurchases||0}</div><div class="lbl">本月購買筆數</div></div>
+      <div class="card"><div class="num" style="color:var(--amber)">${s.openOpps||0}</div><div class="lbl">待跟進商機</div></div>
+      <div class="card"><div class="num green">${(DB.notes||[]).filter(n=>n.status==='已成交').length}</div><div class="lbl">已成交商機</div></div>
+    </div>
+    ${s.monthAmount?`<div class="card" style="margin-top:10px;text-align:center"><div class="num" style="font-size:24px;font-weight:900">$${Number(s.monthAmount).toLocaleString()}</div><div class="lbl" style="font-size:12px;color:var(--sub)">本月購買金額</div></div>`:''}
+    <p style="color:var(--sub);font-size:12px;margin-top:14px;text-align:center">完成率 = 本月已到期任務中完成的比例(略過不計)</p>`;
+}
+
+/* ── 表單 ── */
+function openActionMenu(){ $('menu-mask').classList.add('show'); }
+function closeSheet(id){ $(id).classList.remove('show'); }
+
+function openCustomerForm(){
+  ['f-cname','f-contact','f-tags','f-cnote'].forEach(i=>$(i).value='');
+  $('cust-mask').classList.add('show');
+  setTimeout(()=>$('f-cname').focus(),250);
+}
+async function saveCustomer(){
+  const name = $('f-cname').value.trim();
+  if (!name){ toast('請輸入姓名'); return; }
+  $('cust-save').disabled = true;
+  const r = await api('addCustomer', {
+    name, contact: $('f-contact').value.trim(),
+    tags: $('f-tags').value.trim(), note: $('f-cnote').value.trim(),
+  });
+  $('cust-save').disabled = false;
+  if (r.ok){ closeSheet('cust-mask'); toast('已建立客戶:'+name); await reload(); if(currentTab!=='customers') switchTab('customers'); }
+  else toast(r.error||'建立失敗');
+}
+
+function openNoteForm(prefCustId){
+  if (!DB.customers.length){ toast('請先新增客戶'); openCustomerForm(); return; }
+  closeDetail();
+  $('f-ncust').innerHTML = DB.customers.slice().sort((a,b)=>a.name<b.name?-1:1)
+    .map(c=>`<option value="${esc(c.id)}" ${c.id===prefCustId?'selected':''}>${esc(c.name)}</option>`).join('');
+  $('f-ndate').value = todayStr();
+  $('f-ncontent').value=''; $('f-nopp').checked=false; $('f-nsummary').value='';
+  $('opp-extra').classList.add('hidden');
+  $('note-mask').classList.add('show');
+}
+async function saveNote(){
+  const content = $('f-ncontent').value.trim();
+  if (!content){ toast('請輸入內容'); return; }
+  const isOpp = $('f-nopp').checked;
+  $('note-save').disabled = true;
+  const r = await api('addNote', {
+    customerId: $('f-ncust').value, content,
+    date: $('f-ndate').value, isOpp,
+    summary: isOpp ? ($('f-nsummary').value.trim() || content.slice(0,30)) : '',
+  });
+  $('note-save').disabled = false;
+  if (r.ok){ closeSheet('note-mask'); toast(isOpp?'已記錄商機 💡':'已記錄互動 📝'); await reload(); }
+  else toast(r.error||'儲存失敗');
+}
+async function markDeal(noteId, cid){
+  const r = await api('updateNote', { noteId, status:'已成交' });
+  if (r.ok){ toast('已標記成交 🎉 順手記錄這筆購買吧!'); await reload(); openPurchaseForm(cid); }
+  else toast(r.error||'操作失敗');
+}
+async function promoteOpp(noteId){
+  const cid = currentCustId;
+  const r = await api('updateNote', { noteId, status:'商機' });
+  if (r.ok){ toast('已標為商機 💡'); await reload(); if(cid) openDetail(cid); }
+  else toast(r.error||'操作失敗');
+}
+async function cancelOpp(noteId){
+  if (!confirm('取消這筆商機?')) return;
+  const cid = currentCustId;
+  const r = await api('updateNote', { noteId, status:'取消' });
+  if (r.ok){ toast('已取消'); await reload(); if(cid) openDetail(cid); }
+  else toast(r.error||'操作失敗');
+}
+
+function openPurchaseForm(prefCustId){
+  if (!DB.customers.length){ toast('請先新增客戶'); openCustomerForm(); return; }
+  closeDetail();
+  $('f-pcust').innerHTML = DB.customers.slice()
+    .sort((a,b)=>a.name<b.name?-1:1)
+    .map(c=>`<option value="${esc(c.id)}" ${c.id===prefCustId?'selected':''}>${esc(c.name)}</option>`).join('');
+  $('product-list').innerHTML = [...new Set(DB.purchases.map(p=>p.name))]
+    .map(n=>`<option value="${esc(n)}">`).join('');
+  $('f-product').value=''; $('f-pdate').value=todayStr();
+  $('f-qty').value='1'; $('f-amount').value=''; $('f-days').value=''; $('f-pnote').value='';
+  $('pur-mask').classList.add('show');
+}
+async function savePurchase(){
+  const product = $('f-product').value.trim();
+  if (!product){ toast('請輸入產品名稱'); return; }
+  $('pur-save').disabled = true;
+  const r = await api('addPurchase', {
+    customerId: $('f-pcust').value, product,
+    date: $('f-pdate').value, qty: $('f-qty').value,
+    amount: $('f-amount').value, usedUpDays: $('f-days').value,
+    note: $('f-pnote').value.trim(),
+  });
+  $('pur-save').disabled = false;
+  if (r.ok){
+    closeSheet('pur-mask');
+    toast('已記錄!自動排入 '+(r.tasks||[]).length+' 個跟進提醒 ✅');
+    await reload(); switchTab('today');
+  } else toast(r.error||'送出失敗');
+}
+
+boot();
+</script>
+</body>
+</html>
